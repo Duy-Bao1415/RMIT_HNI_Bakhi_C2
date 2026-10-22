@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "init": "bash init/tcinit.sh"
+    "init": "bash init/tcinit.sh",
+    "test:smoke": "node scripts/smoke-test.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1155.0",

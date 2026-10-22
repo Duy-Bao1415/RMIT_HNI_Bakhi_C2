@@ -5,18 +5,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { useTideCloak } from '@tidecloak/nextjs'
 import Shell from '@/components/Shell'
 import { useApi, tideErrorText, fmtTime } from '@/lib/client'
-import { signRelationshipPolicy } from '@/lib/tide/relationship'
 import {
-  BANK_RECORD_ID, VENDOR_ID, approveRequests, decryptorRequestsFor, fetchAdminPolicy,
-  findUserId, holdersOfDecryptor, listPending, requestDecryptorChange, type ChangeRequest,
+  approveRequests, decryptorRequestsFor, findUserId, holdersOfDecryptor, listPending,
+  requestDecryptorChange, type ChangeRequest,
 } from '@/lib/tide/govern'
 import AuditTable from '@/components/AuditTable'
 import { displayName } from '@/lib/names'
 
-const POLICIES = [
-  { name: 'contributor-write', label: 'Lecturers may only ENCRYPT', subject: { type: 'Role', id: 'contributor' } as const, access: 'write' as const },
-  { name: 'student-read', label: 'Students may only DECRYPT (once they hold _tide_decryptor)', subject: { type: 'Role', id: 'student' } as const, access: 'read' as const },
-]
 const STAGES = ['locked', 'pending', 'open', 'closed']
 
 function localInput(d: Date) {
@@ -42,7 +37,6 @@ export default function CommitteePage() {
   // Only tide-realm-admins can sign governance requests in the Tide enclave.
   const isTideAdmin = hasClientRole('tide-realm-admin', 'realm-management')
   const [exams, setExams] = useState<any[]>([])
-  const [policies, setPolicies] = useState<any[]>([])
   const [pending, setPending] = useState<ChangeRequest[]>([])
   const [userIds, setUserIds] = useState<Record<string, string>>({})
   const [msg, setMsg] = useState<Record<string, { kind: string; text: string }>>({})
@@ -57,8 +51,8 @@ export default function CommitteePage() {
 
   const load = useCallback(async () => {
     try {
-      const [e, p] = await Promise.all([api('/api/exams'), api('/api/policies')])
-      setExams(e.exams); setPolicies(p.policies)
+      const e = await api('/api/exams')
+      setExams(e.exams)
       const names = Array.from(new Set<string>(e.exams.flatMap((x: any) => x.students)))
       const ids: Record<string, string> = {}
       for (const n of names) { try { ids[n] = await findUserId(token!, n) } catch { /* not in realm */ } }
@@ -68,18 +62,6 @@ export default function CommitteePage() {
     setAuditKey((k) => k + 1)
   }, [api, token])
   useEffect(() => { if (token) load() }, [token, load])
-
-  const signPolicy = async (p: (typeof POLICIES)[number]) => {
-    setBusy(p.name)
-    try {
-      const adminPolicy = await fetchAdminPolicy(token!)
-      const signed = await signRelationshipPolicy({ vendorId: VENDOR_ID, subject: p.subject, recordId: BANK_RECORD_ID, access: p.access }, adminPolicy)
-      await api('/api/policies', { method: 'POST', body: JSON.stringify({ name: p.name, policy: signed }) })
-      note('setup', 'ok', `Policy “${p.name}” was signed by the Tide network.`)
-      load()
-    } catch (err) { note('setup', 'bad', `Signing ${p.name} failed: ${tideErrorText(err)}`) }
-    finally { setBusy('') }
-  }
 
   const createExam = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -130,7 +112,6 @@ export default function CommitteePage() {
     } finally { setBusy(''); load() }
   }
 
-  const signed = (name: string) => policies.find((p) => p.name === name)
   const openCount = exams.filter((x) => x.status === 'open').length
 
   return (
@@ -142,22 +123,6 @@ export default function CommitteePage() {
         <div className="stat"><div className="k">Exams</div><div className="v">{exams.length}</div></div>
         <div className="stat"><div className="k">Open now</div><div className="v">{openCount}</div></div>
         <div className="stat"><div className="k">Pending Tide requests</div><div className="v">{pending.length}</div></div>
-        <div className="stat"><div className="k">Policies signed</div><div className="v">{policies.length}/{POLICIES.length}</div></div>
-      </div>
-
-      <div className="card mt-lg">
-        <div className="card-head">
-          <div className="section-title"><span className="icon">🛡️</span><h2>Exam bank setup (one-time)</h2></div>
-          <span className="muted">Built-in contract <code>RelationshipAttestation:1</code> · tag <code>{BANK_RECORD_ID}</code></span>
-        </div>
-        <p className="muted" style={{ marginTop: 0 }}>Only a <b>tide-realm-admin</b> can sign these. Signing opens the Tide enclave in a popup.</p>
-        <div className="table-scroll"><table><tbody>{POLICIES.map((p) => (
-          <tr key={p.name}>
-            <td><b>{p.name}</b><div className="muted">{p.label}</div></td>
-            <td>{signed(p.name) ? <span className="badge success">Signed by {displayName(signed(p.name).granted_by)}</span> : <span className="badge pending">Not signed</span>}</td>
-            <td style={{ textAlign: 'right' }}><button className="ghost" disabled={!!busy} onClick={() => signPolicy(p)}>{busy === p.name ? 'Opening enclave…' : signed(p.name) ? 'Re-sign' : 'Sign policy'}</button></td>
-          </tr>))}</tbody></table></div>
-        {msg.setup && <div className={`note ${msg.setup.kind}`}>{msg.setup.text}</div>}
       </div>
 
       <div className="grid-2 mt-lg">

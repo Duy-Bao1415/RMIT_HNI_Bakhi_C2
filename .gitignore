@@ -8,6 +8,7 @@ dist/
 .env
 .env.*
 !.env.example
+.bank-key.json
 
 # TideCloak local data
 tidecloak-data/

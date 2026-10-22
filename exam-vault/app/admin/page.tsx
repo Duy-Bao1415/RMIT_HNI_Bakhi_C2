@@ -3,14 +3,12 @@
 // question, open an exam, or grant themselves decryption.
 import { useCallback, useEffect, useState } from 'react'
 import { useTideCloak } from '@tidecloak/nextjs'
-import { IAMService } from '@tidecloak/js'
 import Shell from '@/components/Shell'
 import AuditTable from '@/components/AuditTable'
 import { useApi, tideErrorText, fmtTime } from '@/lib/client'
 import { decryptFile } from '@/lib/tide/files'
-import { BANK_RECORD_ID, approveRequests, decryptorRequestsFor, findUserId, listPending, requestDecryptorChange } from '@/lib/tide/govern'
-
-const fromB64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
+import { bankOpener } from '@/lib/vault'
+import { approveRequests, decryptorRequestsFor, findUserId, listPending, requestDecryptorChange } from '@/lib/tide/govern'
 
 export default function AdminPage() {
   const api = useApi()
@@ -28,9 +26,8 @@ export default function AdminPage() {
 
   const tryDecrypt = async (q: any) => {
     try {
-      const { policy_b64 } = await api('/api/policies?name=student-read')
-      const [pt] = await IAMService.doDecrypt([{ encrypted: q.ciphertext, tags: [BANK_RECORD_ID] }], fromB64(policy_b64))
-      note(`q${q.id}`, 'warn', 'DECRYPTED (unexpected!): ' + String(pt).slice(0, 80))
+      const pt = await bankOpener(api)(q.ciphertext)
+      note(`q${q.id}`, 'warn', 'DECRYPTED (unexpected!): ' + pt.slice(0, 80))
     } catch (e) {
       note(`q${q.id}`, 'bad', 'Denied: you have no decryption right. ' + tideErrorText(e))
       api('/api/audit', { method: 'POST', body: JSON.stringify({ action: 'decrypt_attempt', target: `question#${q.id}`, result: 'denied' }) }).catch(() => {})
@@ -40,8 +37,7 @@ export default function AdminPage() {
   const tryOpenFile = async (f: any) => {
     try {
       const d = await api(`/api/files/${f.id}`)
-      const { policy_b64 } = await api('/api/policies?name=student-read')
-      await decryptFile(d.ciphertext, policy_b64, d.mime)
+      await decryptFile(d.ciphertext, bankOpener(api), d.mime)
       note(`f${f.id}`, 'warn', 'FILE OPENED (unexpected!)')
     } catch (e) {
       note(`f${f.id}`, 'bad', 'Denied: the ciphertext was downloaded from S3 but cannot be decrypted. ' + tideErrorText(e))

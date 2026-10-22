@@ -1,9 +1,8 @@
 'use client'
 // Encrypt / decrypt attachments in the browser. The file is base64-encoded and goes through
-// the same text path as questions (one tag: the bank record id), so the only thing that
-// ever leaves the browser - to our server and on to S3 - is ciphertext.
-import { encryptForRecord, decryptForRecord } from './relationship'
-import { BANK_RECORD_ID } from './govern'
+// the same text path as questions (the bank key), so the only thing that ever leaves the
+// browser - to our server and on to S3 - is ciphertext.
+import type { Open, Seal } from '../vault'
 
 export const MAX_FILE_BYTES = 2 * 1024 * 1024
 
@@ -14,14 +13,14 @@ function bytesToB64(b: Uint8Array) {
   return btoa(s)
 }
 
-export async function encryptFile(file: File, policyB64: string): Promise<string> {
+export async function encryptFile(file: File, seal: Seal): Promise<string> {
   if (file.size > MAX_FILE_BYTES) throw new Error(`File too large (max ${MAX_FILE_BYTES / 1024 / 1024} MB)`)
   const b64 = bytesToB64(new Uint8Array(await file.arrayBuffer()))
-  return encryptForRecord(b64, BANK_RECORD_ID, policyB64)
+  return seal(b64)
 }
 
-export async function decryptFile(ciphertext: string, policyB64: string, mime: string): Promise<Blob> {
-  const b64 = await decryptForRecord(ciphertext, BANK_RECORD_ID, policyB64)
+export async function decryptFile(ciphertext: string, open: Open, mime: string): Promise<Blob> {
+  const b64 = await open(ciphertext)
   const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
   return new Blob([bytes], { type: mime || 'application/octet-stream' })
 }

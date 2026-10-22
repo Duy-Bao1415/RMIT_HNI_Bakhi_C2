@@ -3,13 +3,10 @@
 // requires the quorum-signed _tide_decryptor role. Decryption happens here, in the browser.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTideCloak } from '@tidecloak/nextjs'
-import { IAMService } from '@tidecloak/js'
 import Shell from '@/components/Shell'
 import { useApi, tideErrorText, fmtTime } from '@/lib/client'
-import { BANK_RECORD_ID, DECRYPT_ROLE } from '@/lib/tide/govern'
 import { decryptFile } from '@/lib/tide/files'
-
-const fromB64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
+import { bankOpener } from '@/lib/vault'
 
 // Small seeded PRNG so each student's option order is stable (exam version) and re-derivable.
 function rng(seed: string) {
@@ -32,7 +29,7 @@ function Countdown({ to }: { to: string }) {
 
 export default function ExamPage() {
   const api = useApi()
-  const { token, forceRefreshToken, hasRealmRole, getValueFromIdToken } = useTideCloak()
+  const { token, forceRefreshToken, getValueFromIdToken } = useTideCloak()
   const [exams, setExams] = useState<any[]>([])
   const [sel, setSel] = useState<number | null>(null)
   const [questions, setQuestions] = useState<Q[] | null>(null)
@@ -60,14 +57,10 @@ export default function ExamPage() {
       // Pick up a freshly granted _tide_decryptor without logging out.
       await forceRefreshToken().catch(() => false)
       const d = await api(`/api/exams/${exam.id}`)
-      const { policy_b64 } = await api('/api/policies?name=student-read')
-      const plain = await IAMService.doDecrypt(
-        d.items.map((i: any) => ({ encrypted: i.ciphertext, tags: [BANK_RECORD_ID] })),
-        fromB64(policy_b64),
-      )
+      const open = bankOpener(api, exam.id)
+      const plain = await Promise.all(d.items.map((i: any) => open(i.ciphertext)))
       const qs: Q[] = d.items.map((item: any, idx: number) => {
-        const raw = plain[idx]
-        const q = JSON.parse(typeof raw === 'string' ? raw : new TextDecoder().decode(raw))
+        const q = JSON.parse(plain[idx])
         // Older questions carry no type; anything with options is multiple choice.
         const type: Q['type'] = q.type === 'file' || !Array.isArray(q.options) ? 'file' : 'mcq'
         let opts = type === 'mcq' ? q.options.map((text: string, i: number) => ({ letter: LETTERS[i], text })) : []
@@ -82,7 +75,7 @@ export default function ExamPage() {
         for (const a of item.attachments ?? []) {
           try {
             const f = await api(`/api/files/${a.id}`)
-            const blob = await decryptFile(f.ciphertext, policy_b64, f.mime)
+            const blob = await decryptFile(f.ciphertext, open, f.mime)
             qs[idx].attachments.push({ name: f.file_name, mime: f.mime, url: URL.createObjectURL(blob) })
           } catch (err) {
             qs[idx].attachments.push({ name: a.file_name, mime: a.mime, error: tideErrorText(err) })
@@ -94,7 +87,7 @@ export default function ExamPage() {
       api('/api/audit', { method: 'POST', body: JSON.stringify({ action: 'decrypt_attempt', target: `exam#${exam.id}`, result: 'success' }) }).catch(() => {})
     } catch (e) {
       const text = tideErrorText(e)
-      setState({ kind: 'bad', text: text.includes('not open') ? 'The exam is not open yet.' : `The exam is not open for you - the Tide network refused to decrypt. (${text})` })
+      setState({ kind: 'bad', text: text.includes('not open') ? 'The exam is not open yet.' : `The exam is not open for you - decryption was refused. (${text})` })
       api('/api/audit', { method: 'POST', body: JSON.stringify({ action: 'decrypt_attempt', target: `exam#${exam.id}`, result: 'denied' }) }).catch(() => {})
     } finally { setBusy(false) }
   }
@@ -111,7 +104,6 @@ export default function ExamPage() {
   const fullName = [getValueFromIdToken('given_name'), getValueFromIdToken('family_name')].filter(Boolean).join(' ') || username
   const mark = `${fullName} · ${username} · ${clock.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`
   const marks = useMemo(() => Array.from({ length: 60 }, (_, i) => <span key={i}>{mark}</span>), [mark])
-  const hasDecryptor = hasRealmRole(DECRYPT_ROLE)
   const answered = questions ? questions.filter((q) => answers[q.id]).length : 0
 
   return (
@@ -136,7 +128,6 @@ export default function ExamPage() {
               <div className="muted">Committee approvals: <b>{exam.open_count}/{exam.quorum}</b></div>
               <div className="progress"><div style={{ width: `${Math.min(100, (exam.open_count / exam.quorum) * 100)}%` }} /></div>
             </div>
-            <div className="muted">Tide decryption right (<code>{DECRYPT_ROLE}</code>) on your session: <b style={{ color: hasDecryptor ? 'var(--ok)' : 'var(--bad)' }}>{hasDecryptor ? 'GRANTED' : 'NOT YET'}</b></div>
             <button className="big mt" disabled={busy} onClick={openExam}>{busy ? 'Decrypting in your browser…' : 'Enter exam'}</button>
             {state && <div className={`note ${state.kind}`}>{state.text}</div>}
           </div>

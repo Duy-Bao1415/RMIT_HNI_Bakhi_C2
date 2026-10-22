@@ -1,11 +1,10 @@
 'use client'
-// Contributor: write-only. A question is encrypted IN THIS BROWSER under the
-// "contributor-write" policy (encrypt only) and only ciphertext is sent to the server.
+// Contributor: write-only. A question is encrypted IN THIS BROWSER with the bank's public
+// key (encrypt only) and only ciphertext is sent to the server.
 import { useCallback, useEffect, useState } from 'react'
 import Shell from '@/components/Shell'
 import { useApi, tideErrorText, fmtTime } from '@/lib/client'
-import { encryptForRecord } from '@/lib/tide/relationship'
-import { BANK_RECORD_ID } from '@/lib/tide/govern'
+import { bankSealer } from '@/lib/vault'
 import { useTideCloak } from '@tidecloak/nextjs'
 import { encryptFile, MAX_FILE_BYTES } from '@/lib/tide/files'
 
@@ -40,13 +39,13 @@ export default function ContributorPage() {
     if (mode === 'file' && !file) { setMsg({ kind: 'bad', text: 'Please choose a PDF or image file.' }); return }
     setBusy(true); setMsg(null); setPreview('')
     try {
-      const { policy_b64 } = await api('/api/policies?name=contributor-write')
+      const seal = await bankSealer(api)
       const q = mode === 'mcq'
         ? { type: 'mcq', stem: f.stem, options: [f.A, f.B, f.C, f.D], answer: f.answer, subject: f.subject, difficulty: f.difficulty, topic: f.topic }
         : { type: 'file', stem: f.description, subject: f.subject, difficulty: f.difficulty, topic: f.topic }
-      const ciphertext = await encryptForRecord(JSON.stringify(q), BANK_RECORD_ID, policy_b64)
+      const ciphertext = await seal(JSON.stringify(q))
       // Encrypt the file too before anything is sent, so a failure sends nothing.
-      const fileCt = mode === 'file' && file ? await encryptFile(file, policy_b64) : null
+      const fileCt = mode === 'file' && file ? await encryptFile(file, seal) : null
       const { id } = await api('/api/questions', { method: 'POST', body: JSON.stringify({ ciphertext, subject: f.subject }) })
       let fileNote = ''
       if (file && fileCt) {
