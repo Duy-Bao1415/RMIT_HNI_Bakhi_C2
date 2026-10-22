@@ -1,0 +1,21 @@
+{
+  "name": "my-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "init": "bash init/tcinit.sh"
+  },
+  "dependencies": {
+    "next": "16.x",
+    "react": "19.x",
+    "react-dom": "19.x",
+    "@tidecloak/nextjs": "^0.13.11"
+  },
+  "overrides": {
+    "postcss": "^8.5.25",
+    "sharp": "^0.35.3"
+  }
+}
