@@ -1,0 +1,21 @@
+# dependencies / build
+node_modules/
+.next/
+out/
+dist/
+
+# env & secrets (repo will be PUBLIC)
+.env
+.env.*
+!.env.example
+
+# TideCloak local data
+tidecloak-data/
+*.mv.db
+*.trace.db
+
+# misc
+.DS_Store
+Thumbs.db
+*.log
+.tide-pack/

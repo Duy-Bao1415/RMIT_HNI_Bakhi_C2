@@ -1,0 +1,626 @@
+================================================================================
+                    ZERO-LEAK EXAM VAULT - TÀI LIỆU MÔ TẢ CHƯƠNG TRÌNH
+          UNLOCKED Hackathon (Challenge 2, RMIT Hackathon 2026) - TideCloak
+================================================================================
+
+Repo     : https://github.com/Duy-Bao1415/RMIT_HNI_Bakhi_C2
+Hạn nộp  : 18:00 thứ Năm 22/10/2026 (giờ Việt Nam)
+Nộp gồm  : Repo GitHub public (code + README + video demo .mp4 < 100 MB)
+           -> gửi link qua Google Form trên trang tide.org/unlocked
+
+Ký hiệu trong tài liệu:
+  [BẮT BUỘC]  : thuộc luồng demo chính, phải chạy được
+  [MỞ RỘNG]   : tính năng cộng thêm, làm nếu kịp giờ chốt
+  [CẦN KIỂM TRA] : chưa xác nhận được trong tài liệu TideCloak, phải test thực tế
+
+
+--------------------------------------------------------------------------------
+1. TỔNG QUAN
+--------------------------------------------------------------------------------
+
+Zero-Leak Exam Vault là hệ thống quản lý ngân hàng đề thi mà KHÔNG MỘT CÁ NHÂN
+NÀO biết được đề thi trước giờ thi - kể cả người ra câu hỏi, admin hệ thống,
+server, nhà cung cấp cloud hay chính đội phát triển.
+
+Câu một dòng (dùng cho README):
+  "Ngân hàng đề thi dùng chung, nơi đề thi chỉ 'xuất hiện' đúng giờ thi khi đủ
+   hội đồng cùng duyệt - không ai, kể cả admin hay người ra đề, biết trước đề."
+
+
+--------------------------------------------------------------------------------
+2. VẤN ĐỀ (TRUST BOTTLENECK) VÀ GIẢI PHÁP
+--------------------------------------------------------------------------------
+
+2.1 Vấn đề hiện tại
+  - Đề thi luôn nằm trong tay ít nhất một người/máy: người ra đề, thư ký hội
+    đồng, admin server, nơi in ấn.
+  - Chỉ cần một điểm yếu (bị mua chuộc, bị hack, sơ suất) là lộ đề -> thi lại,
+    mất công bằng, mất uy tín. Có tiền lệ: các vụ lộ đề và vụ nâng điểm thi
+    THPT 2018 (Hà Giang, Sơn La...) do người có quyền truy cập dữ liệu gây ra.
+  - Hệ thống phần mềm thông thường dù có "mã hóa" hay "cần 3 người duyệt" thì
+    vẫn có người cầm chìa khóa vạn năng: admin có thể đọc database, sửa code,
+    xóa bước kiểm tra, hoặc tự đổi trạng thái thành "đã duyệt".
+  - Hệ quả: các trường KHÔNG DÁM dùng chung ngân hàng đề với nhau; mỗi nơi tự
+    làm đề riêng, tốn công mà vẫn rủi ro.
+
+2.2 Điểm yếu thật mà ta thừa nhận
+  - Không công nghệ nào ngăn được người ra đề chụp ảnh/nhớ câu hỏi CỦA CHÍNH HỌ.
+  - Cách xử lý: thiết kế để KHÔNG AI BIẾT TOÀN BỘ ĐỀ.
+      + Nhiều giảng viên cùng góp câu vào ngân hàng (ví dụ 200 câu).
+      + Đúng giờ thi, khi đủ quorum, hệ thống mới bốc ngẫu nhiên N câu
+        (ví dụ 40) và trộn thành nhiều mã đề.
+      + Mỗi giảng viên chỉ biết vài câu mình viết và không biết câu nào được
+        chọn -> chụp lại gần như vô dụng.
+      + Watermark trên từng bản đề -> ai chụp màn hình là lộ danh tính.
+
+2.3 Giải pháp bằng TideCloak (Emergent Authority)
+  - Câu hỏi được mã hóa ngay trên trình duyệt người nộp (E2EE). Server, database
+    và cloud chỉ lưu dữ liệu đã mã hóa.
+  - Khóa giải mã không nằm ở bất kỳ đâu một cách trọn vẹn: TideCloak chia khóa
+    thành nhiều mảnh trên Cybersecurity Fabric (mạng node độc lập của Tide).
+  - Quyền đọc đề chỉ "xuất hiện" khi đủ điều kiện: đúng người + đúng luật
+    (policy) + đủ số người duyệt (quorum). Admin không tự làm được.
+  - Lời hứa đổi từ "hãy tin chúng tôi" thành "chúng tôi không thể làm được,
+    kể cả nếu muốn".
+
+2.4 Điều mới trở nên khả thi
+  - Ngân hàng đề dùng chung giữa nhiều giảng viên, nhiều trường mà không ai nắm
+    toàn bộ.
+  - Đề thi chỉ hình thành đúng lúc thi -> không còn khoảng thời gian "đề nằm sẵn
+    ở đâu đó" để bị lộ.
+  - Server/cloud bị hack cũng chỉ lấy được dữ liệu mã hóa.
+  - Điểm đã chốt không ai sửa lén được (Gradebook).
+
+
+--------------------------------------------------------------------------------
+3. KIẾN TRÚC VÀ CÔNG NGHỆ
+--------------------------------------------------------------------------------
+
+3.1 Sơ đồ tổng thể
+
+  [Trình duyệt người dùng]
+      |  - Login qua TideCloak (BYOiD)
+      |  - doEncrypt / doDecrypt chạy TẠI ĐÂY (dữ liệu gốc không rời trình duyệt)
+      v
+  [Next.js app (template @tidecloak/nextjs)]
+      |  - Trang UI theo role
+      |  - API routes (chỉ xử lý dữ liệu đã mã hóa)
+      |  - Middleware chặn route theo role, xác thực JWT phía server
+      |
+      +--> [Neon Postgres]   : câu hỏi (mã hóa), đề thi, lượt duyệt, điểm, log
+      +--> [AWS S3]          : file ảnh/PDF (mã hóa, đuôi .bin)    [MỞ RỘNG]
+      |
+      v
+  [TideCloak server (Docker: tideorg/tidecloak-dev)]
+      |  - User, role, realm, client
+      |  - Quorum-Enforced Governance (change request cần nhiều admin duyệt)
+      v
+  [Tide Cybersecurity Fabric]
+         - Giữ các MẢNH khóa, thực hiện threshold cryptography
+         - Không node nào có khóa hoàn chỉnh
+
+3.2 Công nghệ sử dụng
+  - Frontend + Backend : Next.js (template sinh bởi `npm init @tidecloak/nextjs`)
+  - Xác thực/Phân quyền/Mã hóa : TideCloak + SDK @tidecloak/nextjs
+  - Database           : Neon (Postgres serverless), driver @neondatabase/serverless
+  - Lưu file           : AWS S3 + presigned URL (@aws-sdk/client-s3,
+                         @aws-sdk/s3-request-presigner)            [MỞ RỘNG]
+  - Policy tùy chỉnh   : Forseti (Programmable Policy của Tide, viết bằng C#)
+                                                                   [MỞ RỘNG]
+  - Công cụ phát triển : Claude Code + Raziel (Tide MCP, https://mcp.tide.org/mcp)
+                         File .mcp.json đã có trong repo.
+
+3.3 TideCloak cung cấp gì (5 tính năng) và app dùng thế nào
+  +------------------------------+-----------------------------------------------+
+  | Tính năng TideCloak          | Cách Exam Vault sử dụng                       |
+  +------------------------------+-----------------------------------------------+
+  | BYOiD (Bring Your Own ID)    | Đăng nhập không lưu mật khẩu ở đâu cả; không  |
+  |                              | ai đóng giả giảng viên/hội đồng được.         |
+  | Hermetic E2EE (tag-based)    | Câu hỏi, file được mã hóa bằng doEncrypt với  |
+  |                              | tag "exam"; chỉ ai có role giải mã mới đọc.   |
+  | Quorum-Enforced Governance   | Cấp quyền giải mã (= mở đề), sửa điểm đã chốt |
+  |                              | đều cần nhiều người duyệt. Không còn god-mode.|
+  | Tamper-proof Authorization   | Quyền được niêm phong; server không tự cấp,   |
+  |                              | tự nới quyền được. Tách quyền mã hóa/giải mã. |
+  | Programmable Policy (Forseti)| Luật thời gian: chỉ giải mã sau giờ bắt đầu   |
+  |                              | thi, kể cả khi hội đồng đã duyệt. [MỞ RỘNG]   |
+  +------------------------------+-----------------------------------------------+
+
+3.4 API của SDK sẽ dùng (theo tài liệu Next.js của TideCloak)
+  const { doEncrypt, doDecrypt, hasRealmRole, hasClientRole,
+          getValueFromToken, getValueFromIdToken, refreshToken } = useTideCloak();
+
+  doEncrypt([{ data: <string | Uint8Array>, tags: ["exam"] }])
+      -> yêu cầu role  _tide_exam.selfencrypt  trên access token
+  doDecrypt([{ encrypted: <dữ liệu mã hóa>, tags: ["exam"] }])
+      -> yêu cầu role  _tide_exam.selfdecrypt  trên access token
+      -> kết quả trả về giữ nguyên thứ tự đầu vào
+
+  Component: <Authenticated>, <Unauthenticated>  (ẩn/hiện UI theo trạng thái)
+  Server   : createTideCloakMiddleware (Next.js 13.5-15, file middleware.ts)
+             createTideCloakProxy      (Next.js 16, file proxy.ts)
+             + tiện ích "TideCloak Next.js Verify JWT" để xác thực token trong
+               API route.
+
+
+--------------------------------------------------------------------------------
+4. CÁC ROLE VÀ CHỨC NĂNG
+--------------------------------------------------------------------------------
+
+4.1 Bảng role tổng hợp
+
+  Role ứng dụng (realm role trong TideCloak):
+    contributor  - Giảng viên góp câu hỏi
+    committee    - Thành viên hội đồng thi (mặc định 5 người, quorum 3/5)
+    student      - Thí sinh
+    admin        - Quản trị hệ thống (IT)
+
+  Role mã hóa của TideCloak (tag "exam"):
+    _tide_exam.selfencrypt  - được MÃ HÓA dữ liệu tag "exam"
+    _tide_exam.selfdecrypt  - được GIẢI MÃ dữ liệu tag "exam"
+
+  Gán role mã hóa:
+    contributor -> CHỈ có selfencrypt (không có selfdecrypt => write-only)
+    committee   -> không có selfdecrypt mặc định
+    admin       -> KHÔNG có selfdecrypt, và không tự cấp được (cần quorum)
+    student     -> selfdecrypt CHỈ được cấp khi đủ quorum mở đề, gỡ sau giờ thi
+
+4.2 CONTRIBUTOR (Giảng viên)
+  Được làm:
+    - Đăng nhập, vào trang /contributor
+    - Soạn câu hỏi: nội dung, 4 đáp án, đáp án đúng, môn học, độ khó, chủ đề
+    - Đính kèm ảnh/PDF cho câu hỏi                                 [MỞ RỘNG]
+    - Bấm "Nộp vào ngân hàng" -> câu hỏi được mã hóa trên trình duyệt
+      (doEncrypt) rồi mới gửi lên server
+    - Xem DANH SÁCH câu đã nộp dạng metadata: mã câu, môn, thời gian nộp,
+      trạng thái "Đã khóa" (KHÔNG xem lại nội dung)
+    - Xem số lượng câu trong ngân hàng theo môn (không xem nội dung)
+    - Chấm/nhập điểm bài thi của lớp mình                          [MỞ RỘNG]
+    - Tạo yêu cầu sửa điểm đã chốt (phải qua quorum)               [MỞ RỘNG]
+  Không được làm:
+    - Xem lại nội dung câu đã nộp (kể cả của chính mình)
+    - Xem câu của người khác
+    - Biết câu nào được bốc vào đề
+
+4.3 COMMITTEE (Hội đồng thi)
+  Được làm:
+    - Vào trang /committee
+    - Tạo kỳ thi: tên, môn, giờ bắt đầu, thời lượng, số câu cần bốc,
+      số mã đề, danh sách thí sinh
+    - Xem trạng thái kỳ thi: Locked -> Pending -> Open -> Closed
+    - Bấm "Duyệt mở đề" (mỗi thành viên 1 lần) -> tiến độ x/3 hiển thị cho cả
+      hội đồng
+    - Khi đủ quorum: kích hoạt bốc đề + cấp quyền giải mã cho thí sinh
+    - Bấm "Duyệt đóng đề" sau giờ thi -> gỡ quyền giải mã
+    - Duyệt yêu cầu sửa điểm                                      [MỞ RỘNG]
+    - Xem nhật ký (audit log) mọi hành động
+  Không được làm:
+    - Một mình mở đề hoặc đóng đề
+    - Đọc câu hỏi trước giờ thi (không có selfdecrypt)
+    - Mở đề trước giờ thi kể cả khi đủ quorum (nếu có Forseti) [MỞ RỘNG]
+
+4.4 STUDENT (Thí sinh)
+  Được làm:
+    - Vào trang /exam
+    - Trước giờ/khi chưa đủ quorum: thấy thông báo "Đề chưa được mở" + đồng hồ
+      đếm ngược + tiến độ duyệt của hội đồng (x/3)
+    - Khi đề mở: trình duyệt tải các câu đã mã hóa -> doDecrypt -> hiển thị đề
+    - Nhận MÃ ĐỀ RIÊNG (thứ tự câu và đáp án trộn theo thí sinh)   [MỞ RỘNG]
+    - Đề có WATERMARK "Họ tên + MSSV + thời gian" chạy chéo        [MỞ RỘNG]
+    - Chọn đáp án, nộp bài; xem điểm sau khi điểm được chốt
+  Không được làm:
+    - Xem đề trước khi mở hoặc sau khi đã đóng
+    - Xem đề của thí sinh khác
+
+4.5 ADMIN (Quản trị IT)
+  Được làm:
+    - Quản lý user (tạo, gán role ứng dụng) trong admin console TideCloak
+    - Vào trang /admin: xem DỮ LIỆU THÔ trong database (cột ciphertext) và
+      danh sách file trên S3 -> chỉ thấy chuỗi mã hóa (cảnh demo quan trọng)
+    - Xem audit log, tình trạng hệ thống
+  Không được làm (và đây là điểm phải DEMO):
+    - Đọc câu hỏi/đề thi
+    - Tự cấp role _tide_exam.selfdecrypt cho mình hoặc người khác
+      -> tạo ra change request chờ admin khác duyệt / bị từ chối
+    - Bấm "Force open" bỏ qua hội đồng -> bị từ chối
+    - Sửa điểm đã chốt trực tiếp
+
+4.6 HỆ THỐNG (System, không phải người)
+    - Bốc ngẫu nhiên câu hỏi theo ID trên dữ liệu ĐÃ MÃ HÓA (không đọc nội dung)
+    - Sinh mã đề cho từng thí sinh
+    - Ghi audit log mọi hành động
+    - Tự chuyển trạng thái kỳ thi theo giờ (Locked/Pending/Open/Closed)
+
+
+--------------------------------------------------------------------------------
+5. TÍNH NĂNG CHI TIẾT
+--------------------------------------------------------------------------------
+
+F1. Đăng nhập BYOiD                                             [BẮT BUỘC]
+  - Dùng sẵn luồng login của template TideCloak.
+  - Sau login, đọc role bằng hasRealmRole() để điều hướng:
+      contributor -> /contributor, committee -> /committee,
+      student -> /exam, admin -> /admin
+  - Middleware chặn truy cập trái role (trả 403 hoặc chuyển về trang chủ).
+
+F2. Nộp câu hỏi được mã hóa (write-only)                        [BẮT BUỘC]
+  Luồng:
+    1. Giảng viên điền form câu hỏi.
+    2. Trình duyệt gom thành JSON:
+       { stem, options:[A,B,C,D], answer, subject, difficulty, topic }
+    3. const [ct] = await doEncrypt([{ data: JSON.stringify(q), tags:["exam"] }])
+    4. POST /api/questions { ciphertext: ct, subject }   (subject để lọc, không
+       nhạy cảm; có thể để mã hóa luôn nếu muốn chặt hơn)
+    5. Server lưu vào bảng questions. Server KHÔNG BAO GIỜ nhận nội dung gốc.
+    6. Form reset, hiện "Đã khóa vào ngân hàng - bạn sẽ không xem lại được".
+  Ý nghĩa: giảng viên chỉ có selfencrypt nên không thể giải mã lại.
+
+F3. Màn hình Admin "nhìn thấy gì"                               [BẮT BUỘC]
+  - GET /api/admin/raw trả các dòng questions (id, author, ciphertext, time).
+  - UI hiển thị bảng chuỗi mã hóa + nút "Thử giải mã" -> gọi doDecrypt -> lỗi
+    vì admin không có selfdecrypt -> hiện "Từ chối: không có quyền giải mã".
+  - Trong video: mở thêm dashboard Neon (và S3) để chứng minh cloud cũng chỉ
+    thấy dữ liệu mã hóa.
+
+F4. Tạo kỳ thi                                                  [BẮT BUỘC]
+  - Hội đồng nhập: tên, môn, start_time, duration, num_questions, num_versions,
+    danh sách thí sinh.
+  - Trạng thái khởi tạo: locked.
+
+F5. Duyệt mở đề bằng Quorum                                     [BẮT BUỘC]
+  Luồng:
+    1. Thành viên hội đồng bấm "Duyệt mở đề" -> POST /api/exams/[id]/approve
+    2. Server ghi bảng approvals (mỗi người 1 lần, khóa chính exam_id+member).
+    3. Trạng thái: 1/3 hoặc 2/3 -> "pending"; giao diện cả hội đồng thấy tiến độ.
+    4. Đủ 3/3 -> (a) bốc đề (F6), (b) tạo yêu cầu cấp role
+       _tide_exam.selfdecrypt cho nhóm thí sinh của kỳ thi qua cơ chế
+       Quorum-Enforced Governance của TideCloak (change request cần nhiều admin
+       duyệt), (c) trạng thái -> "open".
+  Lưu ý thiết kế:
+    - Bảng approvals trong app chỉ để HIỂN THỊ tiến độ. Lớp bảo vệ THẬT nằm ở
+      TideCloak: dù ai sửa database thành "open", thí sinh vẫn không giải mã
+      được nếu role selfdecrypt chưa được quorum duyệt.
+    - Nên dùng nhóm (group) "exam-<id>-takers" trong TideCloak để cấp role một
+      lần cho cả nhóm.                                             [CẦN KIỂM TRA]
+  Phương án dự phòng: nếu chưa nối được change request từ web, demo bước duyệt
+  quorum trực tiếp trong admin console của TideCloak; web phản ánh trạng thái.
+
+F6. Bốc đề ngẫu nhiên trên dữ liệu mã hóa                       [BẮT BUỘC]
+  - POST /api/exams/[id]/draw (chỉ chạy khi đủ quorum).
+  - Server lấy danh sách ID câu hỏi theo môn, chọn ngẫu nhiên num_questions câu
+    bằng crypto.randomInt / Fisher-Yates, lưu vào exams.question_ids.
+  - Server chỉ làm việc với ID và ciphertext, không cần và không thể đọc nội
+    dung -> "server bốc đề mà không biết đề là gì".
+
+F7. Thí sinh xem đề và làm bài                                  [BẮT BUỘC]
+  - GET /api/exams/[id] -> danh sách { id, ciphertext } của đề.
+  - Trình duyệt: doDecrypt(items.map(i => ({ encrypted:i.ciphertext,
+    tags:["exam"] }))) -> JSON.parse -> hiển thị.
+  - Nếu chưa có quyền: doDecrypt lỗi -> hiển thị "Đề chưa được mở".
+  - Thí sinh chọn đáp án -> POST /api/exams/[id]/submit.
+    (Đáp án đúng nằm trong câu hỏi mã hóa; chấm điểm phía người có quyền giải
+     mã hoặc sau khi đóng đề - xem F11.)
+
+F8. Nhiều mã đề                                                 [MỞ RỘNG ~15']
+  - Mỗi thí sinh nhận thứ tự câu và thứ tự đáp án trộn khác nhau.
+  - Trộn dựa trên seed = hash(exam_id + student_id) -> tái lập được khi chấm.
+  - Thực hiện trên danh sách ID (server) và trên đáp án (sau giải mã, client).
+
+F9. Watermark chống chụp màn hình                               [MỞ RỘNG ~15']
+  - Lớp phủ CSS chữ mờ lặp lại, xoay chéo: "<Họ tên> - <MSSV> - <giờ:phút>"
+    lấy từ token (getValueFromIdToken).
+  - Không chặn được chụp, nhưng ảnh chụp bị lộ sẽ truy ra người chụp.
+
+F10. Đóng đề                                                    [BẮT BUỘC nhẹ]
+  - Hết giờ hoặc hội đồng duyệt đóng -> gỡ role selfdecrypt khỏi nhóm thí sinh
+    (cũng qua quorum) -> trạng thái "closed".
+
+F11. Gradebook chống sửa điểm                                   [MỞ RỘNG ~15']
+  - Bảng grades: điểm từng thí sinh; trạng thái draft -> finalized.
+  - Sau khi finalized, mọi sửa đổi phải tạo grade_change_request (điểm cũ,
+    điểm mới, lý do) và đủ 3 chữ ký (giảng viên + 2 hội đồng) mới áp dụng.
+  - Dùng lại cơ chế duyệt của F5. Mọi thay đổi ghi audit log.
+  - Cảnh demo: admin sửa trực tiếp 4 -> 9 bị chặn.
+
+F12. File ảnh/PDF mã hóa trên AWS S3                            [MỞ RỘNG ~45']
+  Upload:
+    1. Trình duyệt: bytes = new Uint8Array(await file.arrayBuffer())
+    2. [ct] = await doEncrypt([{ data: bytes, tags:["exam"] }])
+    3. POST /api/upload-url -> server tạo presigned PUT URL (hết hạn 5 phút),
+       key = exam-files/<uuid>.bin
+    4. Trình duyệt PUT ct lên S3 bằng URL đó
+    5. Lưu { s3_key, file_name, mime, question_id } vào bảng files (Neon)
+  Xem:
+    1. GET /api/files/[id]/url -> presigned GET URL
+    2. Tải về -> doDecrypt -> tạo Blob(mime) -> hiển thị <img> hoặc PDF viewer
+  Cấu hình S3:
+    - Block all public access = ON
+    - IAM user chỉ có s3:PutObject, s3:GetObject trên đúng bucket
+    - CORS cho phép PUT, GET từ http://localhost:3000
+    - Key AWS để trong .env.local, KHÔNG commit
+  [CẦN KIỂM TRA]: doEncrypt với file lớn (giới hạn kích thước, tốc độ, kiểu dữ
+  liệu trả về). Test với file < 1 MB trước.
+  Dự phòng: lưu ciphertext trực tiếp vào cột TEXT/BYTEA trong Neon.
+
+F13. Forseti - luật thời gian                                   [MỞ RỘNG ~30']
+  - Policy: dữ liệu tag "exam" chỉ được giải mã sau start_time của kỳ thi,
+    kể cả khi hội đồng đã duyệt. Luật được Tide Fabric thực thi -> hội đồng
+    cũng không mở sớm được.
+  - Prompt cho Claude Code (có MCP): "Help me create a Forseti contract so data
+    tagged 'exam' can only be decrypted after a given start time, even with
+    quorum approval".
+  - Không kịp -> đưa vào Roadmap trong README.
+
+F14. Audit log                                                  [MỞ RỘNG nhẹ]
+  - Bảng audit_logs: ai, làm gì, lúc nào, kết quả (thành công/bị từ chối).
+  - Ghi: nộp câu, thử giải mã thất bại, duyệt, bốc đề, mở/đóng đề, yêu cầu sửa
+    điểm. Hiển thị ở trang hội đồng và admin.
+
+
+--------------------------------------------------------------------------------
+6. TRẠNG THÁI KỲ THI
+--------------------------------------------------------------------------------
+
+   locked ──(duyệt 1, 2)──> pending ──(duyệt thứ 3 + [đến giờ])──> open
+                                                                     |
+                                       closed <──(hết giờ / quorum đóng)
+
+   locked  -> pending : có ít nhất 1 lượt duyệt
+   pending -> open    : đủ 3/5 lượt duyệt (+ đã đến start_time nếu có Forseti)
+                        => bốc đề + cấp selfdecrypt cho thí sinh
+   open    -> closed  : hết thời lượng hoặc quorum duyệt đóng
+                        => gỡ selfdecrypt
+
+
+--------------------------------------------------------------------------------
+7. CƠ SỞ DỮ LIỆU (NEON POSTGRES)
+--------------------------------------------------------------------------------
+
+CREATE TABLE questions (
+  id          SERIAL PRIMARY KEY,
+  author_id   TEXT NOT NULL,            -- sub/username từ token TideCloak
+  subject     TEXT NOT NULL,            -- để lọc khi bốc đề
+  ciphertext  TEXT NOT NULL,            -- toàn bộ câu hỏi + đáp án ĐÃ MÃ HÓA
+  created_at  TIMESTAMP DEFAULT now()
+);
+
+CREATE TABLE exams (
+  id             SERIAL PRIMARY KEY,
+  title          TEXT NOT NULL,
+  subject        TEXT NOT NULL,
+  start_time     TIMESTAMP NOT NULL,
+  duration_min   INT DEFAULT 60,
+  num_questions  INT DEFAULT 10,
+  num_versions   INT DEFAULT 1,
+  question_ids   INT[] DEFAULT '{}',    -- rỗng tới khi bốc đề
+  status         TEXT DEFAULT 'locked'  -- locked | pending | open | closed
+);
+
+CREATE TABLE exam_students (
+  exam_id     INT REFERENCES exams(id),
+  student_id  TEXT,
+  PRIMARY KEY (exam_id, student_id)
+);
+
+CREATE TABLE approvals (
+  exam_id       INT REFERENCES exams(id),
+  committee_id  TEXT,
+  action        TEXT DEFAULT 'open',    -- open | close
+  approved_at   TIMESTAMP DEFAULT now(),
+  PRIMARY KEY (exam_id, committee_id, action)
+);
+
+CREATE TABLE submissions (
+  exam_id     INT REFERENCES exams(id),
+  student_id  TEXT,
+  answers     JSONB,                    -- { question_id: "B", ... }
+  submitted_at TIMESTAMP DEFAULT now(),
+  PRIMARY KEY (exam_id, student_id)
+);
+
+-- [MỞ RỘNG] Gradebook
+CREATE TABLE grades (
+  exam_id     INT REFERENCES exams(id),
+  student_id  TEXT,
+  score       NUMERIC,
+  status      TEXT DEFAULT 'draft',     -- draft | finalized
+  PRIMARY KEY (exam_id, student_id)
+);
+CREATE TABLE grade_change_requests (
+  id          SERIAL PRIMARY KEY,
+  exam_id     INT, student_id TEXT,
+  old_score   NUMERIC, new_score NUMERIC,
+  reason      TEXT, requested_by TEXT,
+  approvers   TEXT[] DEFAULT '{}',
+  status      TEXT DEFAULT 'pending',   -- pending | applied | rejected
+  created_at  TIMESTAMP DEFAULT now()
+);
+
+-- [MỞ RỘNG] File S3
+CREATE TABLE files (
+  id          SERIAL PRIMARY KEY,
+  question_id INT REFERENCES questions(id),
+  s3_key      TEXT NOT NULL,
+  file_name   TEXT, mime TEXT,
+  created_at  TIMESTAMP DEFAULT now()
+);
+
+-- [MỞ RỘNG] Audit
+CREATE TABLE audit_logs (
+  id          SERIAL PRIMARY KEY,
+  actor       TEXT, role TEXT,
+  action      TEXT, target TEXT,
+  result      TEXT,                     -- success | denied
+  at          TIMESTAMP DEFAULT now()
+);
+
+Dữ liệu user/role/quyền KHÔNG lưu ở Neon - do TideCloak quản lý.
+
+
+--------------------------------------------------------------------------------
+8. API ROUTES (Next.js App Router)
+--------------------------------------------------------------------------------
+
+  Method Route                              Role         Mô tả
+  ------ ---------------------------------- ------------ ------------------------
+  POST   /api/questions                     contributor  Lưu ciphertext câu hỏi
+  GET    /api/questions/mine                contributor  Metadata câu đã nộp
+  GET    /api/admin/raw                     admin        Dữ liệu thô (mã hóa)
+  POST   /api/exams                         committee    Tạo kỳ thi
+  GET    /api/exams                         mọi role     Danh sách + trạng thái
+  POST   /api/exams/[id]/approve            committee    Duyệt mở/đóng đề
+  POST   /api/exams/[id]/draw               hệ thống     Bốc ID câu hỏi
+  GET    /api/exams/[id]                    student      Ciphertext của đề
+  POST   /api/exams/[id]/submit             student      Nộp bài
+  POST   /api/grades/[examId]/change        contributor  Tạo yêu cầu sửa điểm
+  POST   /api/grades/requests/[id]/approve  committee    Duyệt sửa điểm
+  POST   /api/upload-url                    contributor  Presigned PUT S3
+  GET    /api/files/[id]/url                student      Presigned GET S3
+  GET    /api/audit                         committee,admin  Nhật ký
+
+  Bảo vệ:
+    - middleware.ts / proxy.ts: protectedRoutes theo role
+        '/contributor/*' : ['contributor']
+        '/committee/*'   : ['committee']
+        '/exam/*'        : ['student']
+        '/admin/*'       : ['admin']
+    - Trong từng API route: xác thực JWT phía server (TideCloak Next.js Verify
+      JWT), kiểm tra role trước khi xử lý.
+
+
+--------------------------------------------------------------------------------
+9. CÁC TRANG GIAO DIỆN
+--------------------------------------------------------------------------------
+
+  /             Trang giới thiệu + nút Login (template sẵn có)
+  /home         Điều hướng theo role sau khi login
+  /contributor  Form nộp câu + danh sách câu đã nộp (metadata) + đính kèm file
+  /committee    Tạo kỳ thi, thẻ kỳ thi với thanh tiến độ duyệt x/3, nút duyệt,
+                audit log, duyệt sửa điểm
+  /exam         Đếm ngược / "Đề chưa mở" / đề đã giải mã + watermark + nộp bài
+  /admin        Bảng dữ liệu thô mã hóa, nút "Thử giải mã" (bị từ chối),
+                nút "Force open" (bị từ chối), audit log
+  /grades       Bảng điểm, yêu cầu sửa điểm                      [MỞ RỘNG]
+
+
+--------------------------------------------------------------------------------
+10. LUỒNG DEMO (KHỚP VIDEO 2 PHÚT)
+--------------------------------------------------------------------------------
+
+  0:00-0:20  Ý tưởng: "Đề thi mà không ai biết trước, kể cả admin."
+  0:20-0:40  Vấn đề trust: đề luôn nằm trong tay ai đó -> lộ đề, sửa điểm.
+  0:40-1:30  Prototype:
+     1. Giảng viên A, B nộp câu -> "Đã khóa", không xem lại được
+     2. Admin mở DB/Neon (và S3) -> chỉ thấy chuỗi mã hóa; bấm "Thử giải mã"
+        và "Force open" -> bị từ chối
+     3. Thí sinh vào /exam -> "Đề chưa được mở"
+     4. Hội đồng duyệt 1/3, 2/3 -> vẫn khóa; duyệt 3/3 -> bốc đề
+     5. Thí sinh thấy đề (mã đề riêng + watermark tên/MSSV)
+     6. [Nếu có] Admin sửa điểm đã chốt -> bị chặn, cần 3 chữ ký
+  1:30-2:00  Điều thay đổi: các trường dám dùng chung ngân hàng đề; không còn
+             god-mode; TideCloak biến "hãy tin chúng tôi" thành "không ai làm
+             được một mình".
+
+  Câu then chốt phải nói: "Nếu bỏ TideCloak, admin có thể đọc đề và tự mở đề.
+  Với TideCloak, khóa không nằm ở đâu cả - quyền chỉ xuất hiện khi đủ quorum."
+
+
+--------------------------------------------------------------------------------
+11. MÔ HÌNH ĐE DỌA (CHỐNG ĐƯỢC GÌ / KHÔNG CHỐNG ĐƯỢC GÌ)
+--------------------------------------------------------------------------------
+
+  Chống được:
+    - Admin/IT đọc đề hoặc tự mở đề
+    - Hacker lấy được database / bucket S3
+    - Nhà cung cấp cloud (Neon, AWS) đọc dữ liệu
+    - Một thành viên hội đồng bị mua chuộc tự mở đề
+    - Sửa điểm lén sau khi chốt
+    - Giả mạo tài khoản (BYOiD)
+  Giảm thiểu (không chặn tuyệt đối):
+    - Người ra câu chụp/nhớ câu của chính họ -> ngân hàng lớn + bốc ngẫu nhiên
+    - Thí sinh chụp màn hình trong giờ thi -> watermark truy vết
+  Không chống được:
+    - Đủ quorum (3/5) cùng thông đồng
+    - Thiết bị của thí sinh bị cài mã độc trong lúc làm bài
+
+
+--------------------------------------------------------------------------------
+12. THỨ TỰ ƯU TIÊN XÂY DỰNG (1 NGƯỜI, 11:05 -> 18:00)
+--------------------------------------------------------------------------------
+
+  Tầng 0  11:05-12:40  Gắn MCP, Docker TideCloak, npm init, enrollment;
+                       TEST mã hóa chéo + TEST quorum cấp role
+  Tầng 1  12:40-14:30  F1-F7, F10 (luồng chính)          -> commit v1-core
+  Tầng 2  14:30-15:15  F8 mã đề, F9 watermark, F11 gradebook -> commit v2
+  Tầng 3  15:15-16:00  F12 S3 ảnh/PDF        (chốt cứng 16:00)
+  Tầng 4  16:00-16:30  F13 Forseti           (chốt cứng 16:30, KHÓA TÍNH NĂNG)
+  Tầng 5  16:30-18:00  README, video, nén <100MB, repo public, nộp Google Form
+                       (KHÔNG ĐƯỢC CẮT)
+
+
+--------------------------------------------------------------------------------
+13. SETUP VÀ BIẾN MÔI TRƯỜNG
+--------------------------------------------------------------------------------
+
+  1) Docker TideCloak:
+     docker run --name mytidecloak -d -v "<thư mục data>:/opt/keycloak/data/h2"
+       -p 8080:8080 -e KC_BOOTSTRAP_ADMIN_USERNAME=admin
+       -e KC_BOOTSTRAP_ADMIN_PASSWORD=password tideorg/tidecloak-dev:latest
+  2) Tạo app:  npm init @tidecloak/nextjs@latest exam-vault
+     -> mở link "ACTION REQUIRED" để hoàn tất enrollment
+  3) cd exam-vault && npm install && npm run dev  -> http://localhost:3000
+  4) Admin console TideCloak: http://localhost:8080 (admin / password)
+     - Tạo role: contributor, committee, student, admin,
+                 _tide_exam.selfencrypt, _tide_exam.selfdecrypt
+     - Tạo ít nhất 2 admin (để demo quorum), 2 giảng viên, 3 hội đồng,
+       1-2 thí sinh (mỗi người 1 tài khoản Tide, dùng cửa sổ ẩn danh)
+
+  .env.local (KHÔNG commit; commit bản .env.example không có giá trị):
+     DATABASE_URL=postgresql://...neon.tech/...
+     AWS_REGION=ap-southeast-1
+     AWS_ACCESS_KEY_ID=...
+     AWS_SECRET_ACCESS_KEY=...
+     S3_BUCKET=exam-vault-...
+
+  .gitignore cần có: .env*, !.env.example, node_modules, .next,
+                     thư mục data của TideCloak
+
+
+--------------------------------------------------------------------------------
+14. NHỮNG ĐIỂM CẦN KIỂM TRA NGAY (TRƯỚC 12:40)
+--------------------------------------------------------------------------------
+
+  [1] Mã hóa chéo: user A (selfencrypt) mã hóa, user B (selfdecrypt) giải mã
+      được không? Tên role có chữ "self" nên có khả năng chỉ giải mã được dữ
+      liệu của chính mình.
+        Được    -> dùng thiết kế trên.
+        Không   -> hỏi MCP: "Set up encrypted data sharing between users with
+                   Tide", hoặc dùng tài khoản "Vault" của hội đồng để mã hóa.
+  [2] Quorum khi cấp role: admin 1 cấp selfdecrypt có tạo change request chờ
+      admin 2 duyệt không? Gọi được từ web (IGA change-request API) không?
+        Hỏi MCP: "Explain Tide's IGA change-request API and how to require
+        multi-admin approval for assigning a role".
+  [3] doEncrypt với Uint8Array (ảnh/PDF): kiểu dữ liệu trả về, giới hạn kích
+      thước.
+  Kẹt quá 15-20 phút -> hỏi Claude Code (MCP) -> Discord Tide #support.
+
+
+--------------------------------------------------------------------------------
+15. README (5 MỤC THEO TIÊU CHÍ CHẤM, TỐI ĐA 300 TỪ)
+--------------------------------------------------------------------------------
+
+  Vision & originality (25%)       : ngân hàng đề không ai nắm toàn bộ
+  Trust constraint insight (20%)   : luôn có người cầm chìa vạn năng -> lộ đề,
+                                     không dám dùng chung ngân hàng đề
+  Value & impact (20%)             : trường, giảng viên, thí sinh, kỳ thi quốc
+                                     gia; ví dụ vụ 2018
+  Why TideCloak matters (20%)      : E2EE + Quorum + tách quyền mã hóa/giải mã;
+                                     bỏ TideCloak thì admin lách được
+  Prototype & storytelling (15%)   : luồng nộp -> admin bị chặn -> 3/3 duyệt ->
+                                     thí sinh thấy đề
+  Roadmap: liên trường, kỳ thi quốc gia, Forseti time-lock, watermark ẩn,
+           gradebook đầy đủ (những phần chưa kịp làm).
+
+================================================================================
+                                   HẾT
+================================================================================
